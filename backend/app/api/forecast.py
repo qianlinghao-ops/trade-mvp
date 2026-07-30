@@ -281,6 +281,16 @@ async def create_proposal(body: dict, db: Session = Depends(get_db)):
     supplier_id = body.get("supplier_id")
     target_month = body.get("target_month")
     items = body.get("items", [])
+    
+    # supplier_idが空の場合、最初の仕入先を使用
+    if not supplier_id:
+        from app.models.company import Company, CompanyType
+        first_supplier = db.query(Company).filter(Company.company_type == CompanyType.supplier).first()
+        if first_supplier:
+            supplier_id = first_supplier.id
+        else:
+            supplier_id = "unknown"
+    
     proposal = create_proposal_from_calculation(db, supplier_id, target_month, items)
     return {"proposal_id": proposal.id, "status": proposal.status, "total_amount": float(proposal.total_amount)}
 
