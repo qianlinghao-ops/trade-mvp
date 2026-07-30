@@ -136,6 +136,17 @@ async def list_forecasts(db: Session = Depends(get_db)):
         ]
     }
 
+
+@router.delete("/{forecast_id}")
+async def delete_forecast(forecast_id: str, db: Session = Depends(get_db)):
+    """内示を削除"""
+    f = db.query(ForecastOrder).filter(ForecastOrder.id == forecast_id).first()
+    if not f:
+        raise HTTPException(404, "内示が見つかりません")
+    db.delete(f)
+    db.commit()
+    return {"success": True}
+
 @router.get("/{forecast_id}")
 async def get_forecast(forecast_id: str, db: Session = Depends(get_db)):
     """内示詳細"""
