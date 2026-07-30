@@ -9,15 +9,14 @@ from pathlib import Path
 from typing import Optional
 import pdfplumber
 from PIL import Image
-import pytesseract
 from docx import Document as DocxDocument
 import openpyxl
 
-# Tesseractの言語設定（日本語+英語）
-TESS_LANG = "jpn+eng"
+# OCR設定（Tesseractなし版）
+OCR_AVAILABLE = False
 
 def extract_text_from_pdf(file_path: str) -> str:
-    """PDFからテキストを抽出（テキストPDF優先、スキャンPDFはOCR）"""
+    """PDFからテキストを抽出（テキストPDF対応）"""
     text = ""
     try:
         with pdfplumber.open(file_path) as pdf:
@@ -25,29 +24,24 @@ def extract_text_from_pdf(file_path: str) -> str:
                 page_text = page.extract_text()
                 if page_text:
                     text += page_text + "\n"
+                # テーブルも抽出
+                tables = page.extract_tables()
+                for table in tables:
+                    for row in table:
+                        if row:
+                            text += "\t".join([str(c) if c else "" for c in row]) + "\n"
     except Exception as e:
         print(f"pdfplumber error: {e}")
-
-    # テキストが少ない場合はOCRを試みる
-    if len(text.strip()) < 50:
-        try:
-            from pdf2image import convert_from_path
-            images = convert_from_path(file_path, dpi=200)
-            for img in images:
-                text += pytesseract.image_to_string(img, lang=TESS_LANG) + "\n"
-        except Exception as e:
-            print(f"OCR fallback error: {e}")
     return text
 
 def extract_text_from_image(file_path: str) -> str:
-    """画像からOCRでテキストを抽出"""
+    """画像ファイル（Tesseractなし版）- メタ情報のみ返す"""
     try:
         img = Image.open(file_path)
-        text = pytesseract.image_to_string(img, lang=TESS_LANG)
-        return text
+        w, h = img.size
+        return f"[画像ファイル: {Path(file_path).name}, サイズ: {w}x{h}px]\n（画像OCRはご利用いただけません。手動で内容を入力してください）"
     except Exception as e:
-        print(f"Image OCR error: {e}")
-        return ""
+        return f"[画像読み込みエラー: {e}]"
 
 def extract_text_from_docx(file_path: str) -> str:
     """Wordファイルからテキストを抽出"""
