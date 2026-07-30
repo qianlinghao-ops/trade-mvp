@@ -22,7 +22,8 @@ async def list_purchase_orders(status: Optional[str] = None, db: Session = Depen
 @router.post("")
 async def create_purchase_order(body: dict, db: Session = Depends(get_db)):
     count = db.query(PurchaseOrder).count()
-    po_number = body.get("po_number") or f"PO-{datetime.now().strftime(\'%Y%m\')}-{count+1:04d}"
+    now_ym = datetime.now().strftime('%Y%m')
+    po_number = body.get("po_number") or f"PO-{now_ym}-{count+1:04d}"
     po = PurchaseOrder(id=str(uuid.uuid4()), po_number=po_number, supplier_id=body.get("supplier_id",""), status=body.get("status", POStatus.draft), order_date=date.fromisoformat(body["order_date"]) if body.get("order_date") else date.today(), expected_date=date.fromisoformat(body["expected_date"]) if body.get("expected_date") else None, currency=body.get("currency","JPY"), payment_terms=body.get("payment_terms",""), notes=body.get("notes",""))
     db.add(po); db.flush()
     total = 0

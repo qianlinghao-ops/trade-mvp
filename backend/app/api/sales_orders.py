@@ -22,7 +22,8 @@ async def list_sales_orders(status: Optional[str] = None, db: Session = Depends(
 @router.post("")
 async def create_sales_order(body: dict, db: Session = Depends(get_db)):
     count = db.query(SalesOrder).count()
-    so_number = body.get("so_number") or f"SO-{datetime.now().strftime(\'%Y%m\')}-{count+1:04d}"
+    now_ym = datetime.now().strftime('%Y%m')
+    so_number = body.get("so_number") or f"SO-{now_ym}-{count+1:04d}"
     so = SalesOrder(id=str(uuid.uuid4()), so_number=so_number, customer_id=body.get("customer_id",""), status=body.get("status", SOStatus.draft), order_date=date.fromisoformat(body["order_date"]) if body.get("order_date") else date.today(), delivery_date=date.fromisoformat(body["delivery_date"]) if body.get("delivery_date") else None, currency=body.get("currency","JPY"), payment_terms=body.get("payment_terms",""), destination=body.get("destination",""), notes=body.get("notes",""))
     db.add(so); db.flush()
     total = 0
