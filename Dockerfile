@@ -1,25 +1,32 @@
 FROM python:3.12-slim
 
-# システム依存関係（Tesseract OCR + 日本語 + PDF処理）
-RUN apt-get update && apt-get install -y \
+# システム依存関係を段階的にインストール（タイムアウト対策）
+RUN apt-get update -o Acquire::Retries=3 && \
+    apt-get install -y --no-install-recommends \
     tesseract-ocr \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update -o Acquire::Retries=3 && \
+    apt-get install -y --no-install-recommends \
     tesseract-ocr-jpn \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update -o Acquire::Retries=3 && \
+    apt-get install -y --no-install-recommends \
     poppler-utils \
     libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
     libgomp1 \
-    fonts-noto-cjk \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 作業ディレクトリ
 WORKDIR /app
 
-# Pythonライブラリインストール
+# Pythonライブラリインストール（段階的に）
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir fastapi uvicorn sqlalchemy alembic python-multipart aiofiles pydantic pydantic-settings
+RUN pip install --no-cache-dir pillow pytesseract pdf2image pdfplumber
+RUN pip install --no-cache-dir python-docx openpyxl jinja2 reportlab
+RUN pip install --no-cache-dir python-jose passlib httpx
 
 # アプリコードをコピー
 COPY backend/ .
