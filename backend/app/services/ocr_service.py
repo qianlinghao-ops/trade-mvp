@@ -2,8 +2,6 @@
 OCRサービス: PDF/Excel/Wordから情報を抽出する
 apt-get不使用版 - pypdf + python-docx + openpyxlを使用
 """
-import os
-import json
 import re
 from pathlib import Path
 from PIL import Image
@@ -17,10 +15,9 @@ except ImportError:
     PDF_AVAILABLE = False
 
 def extract_text_from_pdf(file_path: str) -> str:
-    """PDFからテキストを抽出"""
-    text = ""
     if not PDF_AVAILABLE:
         return "[PDF処理ライブラリが利用できません]"
+    text = ""
     try:
         reader = PdfReader(file_path)
         for page in reader.pages:
@@ -32,7 +29,6 @@ def extract_text_from_pdf(file_path: str) -> str:
     return text
 
 def extract_text_from_image(file_path: str) -> str:
-    """画像ファイル（OCRなし版）"""
     try:
         img = Image.open(file_path)
         w, h = img.size
@@ -41,7 +37,6 @@ def extract_text_from_image(file_path: str) -> str:
         return f"[画像読み込みエラー: {e}]"
 
 def extract_text_from_docx(file_path: str) -> str:
-    """Wordファイルからテキストを抽出"""
     try:
         doc = DocxDocument(file_path)
         text = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
@@ -50,11 +45,9 @@ def extract_text_from_docx(file_path: str) -> str:
                 text += "\t".join([cell.text for cell in row.cells]) + "\n"
         return text
     except Exception as e:
-        print(f"DOCX error: {e}")
         return ""
 
 def extract_text_from_excel(file_path: str) -> str:
-    """ExcelファイルからテキストをCSV形式で抽出"""
     try:
         wb = openpyxl.load_workbook(file_path, data_only=True)
         text = ""
@@ -66,7 +59,6 @@ def extract_text_from_excel(file_path: str) -> str:
                     text += row_text + "\n"
         return text
     except Exception as e:
-        print(f"Excel error: {e}")
         return ""
 
 def extract_text(file_path: str) -> str:
@@ -97,21 +89,15 @@ def _find_amount(text: str) -> str:
 
 def _find_items(text: str) -> list:
     items = []
-    patterns = [
-        r'([A-Za-z0-9\-\u3040-\u9fff]+)\s+(\d+)\s*(?:個|pcs|units|本|枚|箱)?\s+([0-9,]+(?:\.\d{1,2})?)',
-    ]
-    for pat in patterns:
-        for m in re.finditer(pat, text, re.MULTILINE):
-            groups = m.groups()
-            if len(groups) >= 3:
-                try:
-                    name = groups[0].strip()
-                    qty = int(re.sub(r'[^\d]', '', groups[1])) if re.sub(r'[^\d]', '', groups[1]) else 1
-                    price = float(re.sub(r'[^\d.]', '', groups[2])) if re.sub(r'[^\d.]', '', groups[2]) else 0
-                    items.append({"product_name": name, "quantity": qty, "unit_price": price,
-                                  "amount": round(qty * price, 2), "sku": "", "unit": "個"})
-                except Exception:
-                    continue
+    for m in re.finditer(r'([A-Za-z0-9\-\u3040-\u9fff]+)\s+(\d+)\s*(?:個|pcs|units|本|枚|箱)?\s+([0-9,]+(?:\.\d{1,2})?)', text, re.MULTILINE):
+        try:
+            name, qty_s, price_s = m.group(1).strip(), m.group(2), m.group(3)
+            qty = int(qty_s)
+            price = float(re.sub(r'[^\d.]', '', price_s)) if re.sub(r'[^\d.]', '', price_s) else 0
+            items.append({"product_name": name, "quantity": qty, "unit_price": price,
+                          "amount": round(qty * price, 2), "sku": "", "unit": "個"})
+        except Exception:
+            continue
     if not items:
         items = [{"product_name": "（書類から自動抽出）", "quantity": 1,
                   "unit_price": 0, "amount": 0, "sku": "", "unit": "個"}]
@@ -121,8 +107,7 @@ def parse_po(text: str) -> dict:
     import random
     return {
         "doc_type": "po",
-        "po_number": _find([r'P\.?O\.?\s*(?:No\.?|Number|番号)[:\s#]*([A-Za-z0-9\-]+)',
-                            r'発注番号[:\s]*([A-Za-z0-9\-]+)'], text, f"PO-AUTO-{random.randint(1000,9999)}"),
+        "po_number": _find([r'P\.?O\.?\s*(?:No\.?|Number|番号)[:\s#]*([A-Za-z0-9\-]+)', r'発注番号[:\s]*([A-Za-z0-9\-]+)'], text, f"PO-AUTO-{random.randint(1000,9999)}"),
         "supplier": _find([r'(?:Supplier|仕入先|To)[:\s]+([^\n]+)'], text, "（自動抽出）"),
         "order_date": _find([r'(?:Date|日付|発注日)[:\s]+(\d{4}[-/]\d{1,2}[-/]\d{1,2})'], text, "2026-07-30"),
         "currency": "JPY" if re.search(r'円|JPY', text) else ("USD" if re.search(r'USD|\$', text) else "JPY"),
@@ -136,8 +121,7 @@ def parse_invoice(text: str) -> dict:
     import random
     return {
         "doc_type": "invoice",
-        "invoice_number": _find([r'Invoice\s*(?:No\.?|Number|番号)[:\s#]*([A-Za-z0-9\-]+)',
-                                 r'請求番号[:\s]*([A-Za-z0-9\-]+)'], text, f"INV-AUTO-{random.randint(1000,9999)}"),
+        "invoice_number": _find([r'Invoice\s*(?:No\.?|Number|番号)[:\s#]*([A-Za-z0-9\-]+)', r'請求番号[:\s]*([A-Za-z0-9\-]+)'], text, f"INV-AUTO-{random.randint(1000,9999)}"),
         "customer": _find([r'(?:Bill\s*To|Sold\s*To|得意先|請求先)[:\s]+([^\n]+)'], text, "（自動抽出）"),
         "invoice_date": _find([r'(?:Invoice\s*Date|請求日|Date)[:\s]+(\d{4}[-/]\d{1,2}[-/]\d{1,2})'], text, "2026-07-30"),
         "due_date": _find([r'(?:Due\s*Date|支払期限)[:\s]+(\d{4}[-/]\d{1,2}[-/]\d{1,2})'], text, ""),
@@ -168,8 +152,7 @@ def parse_document(file_path: str, doc_type: str) -> dict:
     if not text.strip():
         text = "（テキスト抽出不可）"
     parsers = {"po": parse_po, "invoice": parse_invoice, "packing_list": parse_packing_list}
-    parser = parsers.get(doc_type, parse_po)
-    result = parser(text)
+    result = parsers.get(doc_type, parse_po)(text)
     result["raw_text_preview"] = text[:500]
     filled = sum(1 for v in result.values() if v and v != "（自動抽出）" and v != "（書類から自動抽出）")
     result["confidence_score"] = round(filled / len(result), 2) if result else 0.5

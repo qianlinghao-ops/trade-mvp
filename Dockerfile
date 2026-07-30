@@ -1,6 +1,20 @@
 FROM python:3.12-slim
 
-# apt-get一切不使用 - 純粋なPythonのみ
+# システム依存関係（Tesseract OCR + 日本語 + PDF処理）
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    tesseract-ocr-jpn \
+    poppler-utils \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    fonts-noto-cjk \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# 作業ディレクトリ
 WORKDIR /app
 
 # Pythonライブラリインストール
