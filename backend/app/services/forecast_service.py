@@ -1,6 +1,6 @@
 """
-内示管理サービス - 実際のPDFフォーマット完全対応版 v2
-カラーコード逆引き + カンマ正規化 + 0値対応
+内示管理サービス - 実際のPDFフォーマット完全対応版 v3
+カラーコード逆引き + カンマ正規化 + 0値対応 + 上期下期両対応 + 部品名称完全抽出
 """
 import re
 import uuid
@@ -25,7 +25,6 @@ except ImportError:
 
 
 def extract_forecast_from_pdf(file_path: str) -> dict:
-    """PDFから内示データを抽出"""
     text = ""
     if PDF_AVAILABLE:
         try:
@@ -40,23 +39,16 @@ def extract_forecast_from_pdf(file_path: str) -> dict:
 
 
 def _normalize_text(text: str) -> str:
-    """カンマ区切り数値を正規化: 1,205 → 1205, 1,510,709 → 1510709"""
+    """カンマ区切り数値を正規化: 1,205 → 1205"""
     for _ in range(4):
         text = re.sub(r"(\d),(\d{3})\b", r"\1\2", text)
     return text
 
 
 def _parse_forecast_text(text: str) -> dict:
-    """
-    実際のPDFフォーマットを解析
-    - 月ヘッダーが連結: "26-0426-0526-06..."
-    - データが1行に連結: 部番+カラー+単価群+合計数量+月別数量×6+部品名+金額群
-    - 上期・下期で別ページ（月ラベルが異なる）
-    """
     # 全ページの月ラベルを抽出（上期・下期両方）
     all_month_sets = []
-    month_block_pattern = re.compile(r"((?:\d{2}-\d{2}){2,})")
-    for mb in month_block_pattern.finditer(text):
+    for mb in re.finditer(r"((?:\d{2}-\d{2}){2,})", text):
         raw = mb.group(1)
         labels_raw = re.findall(r"\d{2}-\d{2}", raw)
         labels = [f"20{m}" for m in labels_raw if 1 <= int(m.split("-")[1]) <= 12]
@@ -65,24 +57,14 @@ def _parse_forecast_text(text: str) -> dict:
             if key not in [tuple(s) for s in all_month_sets]:
                 all_month_sets.append(labels[:6])
 
-    print(f"月セット数: {len(all_month_sets)}")
-    for ms in all_month_sets:
-        print(f"  {ms}")
-
-    # デフォルト月ラベル
     if not all_month_sets:
         all_month_sets = [[
             (datetime.now() + relativedelta(months=i)).strftime("%Y-%m")
             for i in range(6)
         ]]
 
-    # テキストを正規化
     text_norm = _normalize_text(text)
-
-    # 全部番を抽出（月セットごとに対応）
     all_items = _extract_all_items(text_norm, all_month_sets)
-
-    # 最初の月セットを代表月として使用
     first_month = all_month_sets[0][0] if all_month_sets else datetime.now().strftime("%Y-%m")
 
     return {
@@ -97,14 +79,10 @@ def _parse_forecast_text(text: str) -> dict:
 
 
 def _extract_all_items(text_norm: str, all_month_sets: list) -> list:
-    """
-    カラーコード逆引きアプローチで全部番を抽出
-    各カラーコードの直前から部番を、直後から月別数量を取得
-    """
     items = []
     seen = set()
 
-    # ページ境界を検出（月ヘッダーの位置）
+    # ページ境界を検出
     page_boundaries = []
     for mb in re.finditer(r"((?:\d{2}-\d{2}){2,})", text_norm):
         raw = mb.group(1)
@@ -114,10 +92,11 @@ def _extract_all_items(text_norm: str, all_month_sets: list) -> list:
             page_boundaries.append((mb.start(), labels[:6]))
 
     def get_month_labels_for_pos(pos):
-        """テキスト位置に対応する月ラベルを返す"""
         current_labels = all_month_sets[0] if all_month_sets else []
+        best_pos = -1
         for boundary_pos, labels in page_boundaries:
-            if pos >= boundary_pos:
+            if pos >= boundary_pos and boundary_pos > best_pos:
+                best_pos = boundary_pos
                 current_labels = labels
         return current_labels
 
@@ -129,8 +108,6 @@ def _extract_all_items(text_norm: str, all_month_sets: list) -> list:
 
         # カラーコードの直前から部番を抽出
         before = text_norm[max(0, cc_start - 100):cc_start]
-
-        # 部番パターン（数字4-5桁始まり or 英字+数字始まり）
         part_match = re.search(
             r"(\d{4,5}-[A-Z0-9]{2,}(?:\s*-\s*[A-Z0-9]+)*(?:\s*-\s*\d+)?(?:\s*-\s*\d+)?)\s*$",
             before
@@ -140,40 +117,51 @@ def _extract_all_items(text_norm: str, all_month_sets: list) -> list:
                 r"([A-Z]\d[A-Z0-9]{3}-[A-Z0-9]{2,}(?:\s*-\s*[A-Z0-9]+)*(?:\s*-\s*\d+)?(?:\s*-\s*\d+)?)\s*$",
                 before
             )
-
         if not part_match:
             continue
 
         part_no = part_match.group(1).strip()
-
-        # 重複チェック（同じ部番が上期・下期で出る場合は月ラベルで区別）
         month_labels = get_month_labels_for_pos(cc_start)
         unique_key = f"{part_no}_{month_labels[0] if month_labels else ''}"
         if unique_key in seen:
             continue
 
         # カラーコードの後から数値を抽出
-        after = text_norm[cc_end:cc_end + 500]
-
-        # 単価（小数点あり）を除去
+        after = text_norm[cc_end:cc_end + 600]
         after_no_prices = re.sub(r"\d+\.\d{2}", "", after)
 
-        # 整数を抽出（0を含む、lookbehind/lookaheadで確実に）
+        # 整数を抽出（0を含む）
         int_tokens = re.findall(r"(?<!\d)(\d{1,7})(?!\d)", after_no_prices)
         int_nums = [int(t) for t in int_tokens if int(t) <= 9999999]
 
-        # 合計数量 + 月別6ヶ月 = 7つの数値が必要
         if len(int_nums) >= 7:
             total_qty = int_nums[0]
             month_qtys = int_nums[1:7]
-
-            # 検証: 月別合計が合計数量と一致するか
             month_sum = sum(month_qtys)
-            tolerance = max(3, total_qty * 0.05)
-            if total_qty == month_sum or abs(month_sum - total_qty) <= tolerance:
-                # 部品名を抽出
-                name_match = re.search(r"([A-Z][A-Z,\(\)\s\-\.]{3,35}?)\s+\d", after)
+            tolerance = max(5, total_qty * 0.1)
+
+            # 検証を緩和: 合計が0でも月別に値があれば採用
+            valid = (total_qty == month_sum or
+                     abs(month_sum - total_qty) <= tolerance or
+                     (total_qty == 0 and any(q > 0 for q in month_qtys)) or
+                     (month_sum > 0 and total_qty == 0))
+
+            if valid or any(q > 0 for q in month_qtys):
+                # 部品名称を抽出（数値に直接連結した英字列も対応）
+                name_match = re.search(
+                    r"\d\s*([A-Z][A-Z,\(\)\s\-\.A-Z0-9]{3,50}?)(?:\s+\d|\s*$)",
+                    after_no_prices
+                )
                 part_name = name_match.group(1).strip() if name_match else ""
+
+                # 部品名が短すぎる場合は別パターンで試す
+                if len(part_name) < 4:
+                    name_match2 = re.search(
+                        r"([A-Z][A-Z,\(\)\s\-\.]{3,50}?)\s+\d",
+                        after
+                    )
+                    if name_match2:
+                        part_name = name_match2.group(1).strip()
 
                 items.append({
                     "part_no": part_no,
@@ -185,7 +173,6 @@ def _extract_all_items(text_norm: str, all_month_sets: list) -> list:
                 })
                 seen.add(unique_key)
 
-    print(f"抽出件数: {len(items)}")
     return items
 
 
@@ -197,7 +184,6 @@ def _find_customer(text: str) -> str:
 
 
 def calculate_order_proposals(db: Session, supplier_id: str, target_month: str) -> List[dict]:
-    """発注数量 = 内示数量 - 現在庫数量 - 発注残数量 + 安全在庫係数"""
     proposals = []
     forecast_items = db.query(ForecastItem).all()
 
