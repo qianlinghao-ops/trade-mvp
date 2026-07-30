@@ -119,7 +119,7 @@ class AutoOrderProposalItem(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     proposal_id = Column(String, ForeignKey("auto_order_proposals.id"), nullable=False)
-    product_id = Column(String, ForeignKey("products.id"), nullable=False)
+    product_id = Column(String, ForeignKey("products.id"), nullable=True)
     product_name = Column(String(200))
     sku = Column(String(50))
     # 計算内訳
