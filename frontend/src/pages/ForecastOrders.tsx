@@ -170,6 +170,9 @@ const ForecastOrders: React.FC = () => {
     return options;
   };
 
+  const [forecastDetail, setForecastDetail] = useState<any>(null);
+  const [forecastDetailVisible, setForecastDetailVisible] = useState(false);
+
   const proposalStatusMap: Record<string, { label: string; color: string }> = {
     draft: { label: '下書き', color: 'default' },
     approved: { label: '承認済', color: 'green' },
@@ -234,6 +237,18 @@ const ForecastOrders: React.FC = () => {
                   }},
                 { title: '取込日時', dataIndex: 'created_at', key: 'created_at',
                   render: (v: string) => v ? new Date(v).toLocaleString('ja-JP') : '-' },
+                { title: '操作', key: 'actions',
+                  render: (_: any, record: any) => (
+                    <Button size="small" icon={<FileTextOutlined />}
+                      onClick={async () => {
+                        const res = await client.get(`/forecast/${record.id}`);
+                        setForecastDetail(res.data);
+                        setForecastDetailVisible(true);
+                      }}>
+                      内示数量を確認
+                    </Button>
+                  )
+                },
               ]}
             />
           </Card>
@@ -415,6 +430,62 @@ const ForecastOrders: React.FC = () => {
           </Card>
         </TabPane>
       </Tabs>
+
+      {/* ─── 内示詳細モーダル ─── */}
+      <Modal
+        title={`📊 内示数量詳細: ${forecastDetail?.customer_name} (${forecastDetail?.forecast_month})`}
+        open={forecastDetailVisible}
+        onCancel={() => setForecastDetailVisible(false)}
+        width={1000}
+        footer={<Button onClick={() => setForecastDetailVisible(false)}>閉じる</Button>}
+      >
+        {forecastDetail && (
+          <div>
+            <Alert
+              type="info"
+              message={`抽出件数: ${forecastDetail.items?.length}件 | 月別内示数量（6ヶ月分）`}
+              style={{ marginBottom: 16 }}
+              showIcon
+            />
+            <Table
+              dataSource={forecastDetail.items}
+              rowKey="id"
+              size="small"
+              scroll={{ x: 900 }}
+              pagination={{ pageSize: 20 }}
+              columns={[
+                { title: '部番', dataIndex: 'sku', key: 'sku', fixed: 'left' as const, width: 200,
+                  render: (v: string) => <Text code style={{ fontSize: 11 }}>{v}</Text> },
+                { title: '部品名称', dataIndex: 'product_name', key: 'product_name', width: 180,
+                  render: (v: string) => <Text ellipsis style={{ maxWidth: 160 }}>{v}</Text> },
+                ...(forecastDetail.items?.[0]?.months?.map((m: any, i: number) => ({
+                  title: m.label || `月${i+1}`,
+                  key: `month_${i}`,
+                  width: 90,
+                  align: 'right' as const,
+                  render: (_: any, record: any) => {
+                    const qty = record.months?.[i]?.qty || 0;
+                    return <Text strong style={{ color: qty > 0 ? '#1F3864' : '#ccc' }}>{qty.toLocaleString()}</Text>;
+                  }
+                })) || []),
+                { title: '商品マスタ', key: 'product_id', width: 100,
+                  render: (_: any, record: any) => record.product_id
+                    ? <Tag color="green">紐付済</Tag>
+                    : <Tag color="orange">未紐付</Tag>
+                },
+              ]}
+            />
+            {forecastDetail.items?.some((i: any) => !i.product_id) && (
+              <Alert
+                type="warning"
+                message="「未紐付」の部番は商品マスタに登録されていません。商品マスタに部番を登録すると自動発注計算に使用できます。"
+                style={{ marginTop: 16 }}
+                showIcon
+              />
+            )}
+          </div>
+        )}
+      </Modal>
 
       {/* ─── 内示アップロードモーダル ─── */}
       <Modal

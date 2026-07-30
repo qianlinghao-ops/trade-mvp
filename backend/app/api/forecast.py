@@ -2,6 +2,7 @@
 内示管理・自動発注提案 API
 """
 import json
+import re
 import uuid
 import shutil
 from pathlib import Path
@@ -72,17 +73,26 @@ async def upload_forecast(
             while len(month_labels) < 6:
                 month_labels.append("")
 
-            # SKUから商品を検索
+            # 部番（SKU）から商品マスタを検索
             product = None
-            if item_data.get("sku"):
-                product = db.query(Product).filter(Product.sku == item_data["sku"]).first()
+            part_no = item_data.get("part_no") or item_data.get("sku", "")
+            if part_no:
+                # 完全一致
+                product = db.query(Product).filter(Product.sku == part_no).first()
+                # スペース除去して部分一致
+                if not product:
+                    clean_part = re.sub(r"\s+", "", part_no)
+                    for p in db.query(Product).all():
+                        if re.sub(r"\s+", "", p.sku) == clean_part:
+                            product = p
+                            break
 
             fi = ForecastItem(
                 id=str(uuid.uuid4()),
                 forecast_order_id=forecast.id,
                 product_id=product.id if product else None,
                 product_name=item_data.get("product_name", ""),
-                sku=item_data.get("sku", ""),
+                sku=part_no,
                 month_1_qty=month_qtys[0], month_1_label=month_labels[0],
                 month_2_qty=month_qtys[1], month_2_label=month_labels[1],
                 month_3_qty=month_qtys[2], month_3_label=month_labels[2],

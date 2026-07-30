@@ -1,16 +1,14 @@
 """
-内示管理サービス
-- PDFから内示数量を抽出
-- 自動発注数量計算: 発注数量 = 内示数量 - 現在庫 - 発注残 + 安全在庫
-- 発注提案の生成
+内示管理サービス - 実際のPDFフォーマット対応版
+PDFフォーマット:
+  部番 カラー 部品名称 計画コード 加工単価 購入単価 量産数量 予定額
+  月ヘッダー: 26-04, 26-05, 26-06, 26-07, 26-08, 26-09
 """
-import json
 import re
 import uuid
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
-from pathlib import Path
-from typing import List, Optional
+from typing import List
 from sqlalchemy.orm import Session
 
 from app.models.forecast import (
@@ -20,7 +18,6 @@ from app.models.forecast import (
 from app.models.inventory import Inventory
 from app.models.purchase_order import PurchaseOrder, POStatus
 from app.models.product import Product
-from app.models.company import Company
 
 try:
     from pypdf import PdfReader
@@ -28,10 +25,8 @@ try:
 except ImportError:
     PDF_AVAILABLE = False
 
-# ─── PDF内示データ抽出 ────────────────────────────────────────────────
 
 def extract_forecast_from_pdf(file_path: str) -> dict:
-    """PDFから内示データを抽出"""
     text = ""
     if PDF_AVAILABLE:
         try:
@@ -42,130 +37,156 @@ def extract_forecast_from_pdf(file_path: str) -> dict:
                     text += t + "\n"
         except Exception as e:
             print(f"PDF読み込みエラー: {e}")
+    return _parse_honda_forecast(text)
 
-    return _parse_forecast_text(text)
 
-def _parse_forecast_text(text: str) -> dict:
-    """テキストから内示データをパース"""
-    result = {
-        "customer": _find(r'(?:得意先|Customer|Bill\s*To)[:\s]+([^\n]+)', text, "（自動抽出）"),
-        "forecast_month": _find(r'(\d{4}[-/年]\d{1,2})', text, datetime.now().strftime("%Y-%m")),
-        "items": [],
-        "raw_text": text[:1000],
+def _parse_honda_forecast(text: str) -> dict:
+    """
+    実際の内示PDFフォーマットを解析
+    月ヘッダー: 26-04, 26-05 など
+    各部番ごとに: 加工単価/購入単価/量産数量/予定額 の4行セット×6ヶ月
+    """
+    # 月ラベルを抽出（例: 26-04 → 2026-04）
+    month_pattern = re.findall(r"\b(\d{2})-(\d{2})\b", text)
+    month_labels = []
+    seen = set()
+    for yy, mm in month_pattern:
+        year = 2000 + int(yy)
+        label = f"{year}-{mm}"
+        if label not in seen and 1 <= int(mm) <= 12:
+            seen.add(label)
+            month_labels.append(label)
+    month_labels = month_labels[:6]
+
+    items = _extract_items_from_text(text, month_labels)
+
+    return {
+        "customer": _find_customer(text),
+        "forecast_month": month_labels[0] if month_labels else datetime.now().strftime("%Y-%m"),
+        "month_labels": month_labels,
+        "items": items,
+        "raw_text": text[:2000],
+        "total_items": len(items),
     }
 
-    # 月ラベルを抽出（例: 2026-08, 2026/09 など）
-    month_labels = re.findall(r'(\d{4}[-/]\d{1,2})', text)
-    month_labels = list(dict.fromkeys(month_labels))[:6]  # 重複除去・最大6ヶ月
 
-    # 商品行を抽出（SKU + 数量パターン）
-    item_patterns = [
-        r'([A-Z]{2,}-\d{3})\s+([^\n]+?)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)',
-        r'(SKU-\d+)\s+([^\n]+?)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)',
-        r'([A-Za-z0-9\-]+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)',
-    ]
-
-    items_found = []
-    for pat in item_patterns:
-        for m in re.finditer(pat, text, re.MULTILINE):
-            groups = m.groups()
-            if len(groups) >= 7:
-                try:
-                    qtys = [int(g) for g in groups[-6:]]
-                    items_found.append({
-                        "sku": groups[0].strip(),
-                        "product_name": groups[1].strip() if len(groups) > 7 else groups[0].strip(),
-                        "month_qtys": qtys,
-                    })
-                except Exception:
-                    continue
-        if items_found:
-            break
-
-    # 月ラベルを付与
-    base_month = datetime.now()
-    for item in items_found:
-        labels = []
-        for i in range(6):
-            m = base_month + relativedelta(months=i)
-            labels.append(m.strftime("%Y-%m"))
-        item["month_labels"] = labels[:6]
-        result["items"].append(item)
-
-    # 抽出できなかった場合はサンプルデータ
-    if not result["items"]:
-        result["items"] = _generate_sample_items()
-
-    return result
-
-def _generate_sample_items() -> list:
-    """PDF抽出失敗時のサンプル（手動修正用）"""
-    base = datetime.now()
-    labels = [(base + relativedelta(months=i)).strftime("%Y-%m") for i in range(6)]
-    return [
-        {"sku": "", "product_name": "（PDFから自動抽出できませんでした。手動で入力してください）",
-         "month_qtys": [0, 0, 0, 0, 0, 0], "month_labels": labels}
-    ]
-
-def _find(pattern: str, text: str, default: str = "") -> str:
-    m = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
-    return m.group(1).strip() if m else default
-
-# ─── 自動発注数量計算 ─────────────────────────────────────────────────
-
-def calculate_order_proposals(
-    db: Session,
-    supplier_id: str,
-    target_month: str,  # "2026-08"
-) -> List[dict]:
+def _extract_items_from_text(text: str, month_labels: list) -> list:
     """
-    発注数量 = 内示数量 - 現在庫数量 - 発注残数量 + 安全在庫係数
+    PDFテキストから部番と月別数量を抽出
+    
+    このPDFの構造:
+    - 部番行: "1A000-MLM -E020-M1  K2AE00  UNIT ASSY,DRIVE"
+    - 各月のデータ: 単価\n単価\n数量\n金額 の4行セット
+    - 数量行は整数のみ（カンマなし）
     """
+    items = []
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    
+    # 部番パターン: 英数字とハイフンで構成、スペースを含む場合あり
+    part_no_pattern = re.compile(
+        r"^([A-Z0-9]{4,}-[A-Z0-9]{2,}(?:\s*-\s*[A-Z0-9]+)*(?:\s*-\s*\d+)?(?:\s*-\s*\d+)?)"
+    )
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = part_no_pattern.match(line)
+        if m:
+            part_no = m.group(1).strip()
+            # 部品名称を抽出（大文字英字の連続）
+            name_match = re.search(r"([A-Z][A-Z,\(\)\s\-\.]{4,})", line)
+            part_name = name_match.group(1).strip() if name_match else part_no
+            
+            # 次の行から数値を収集
+            # 各月: 単価(小数あり), 単価(小数あり), 数量(整数), 金額(大きい整数)
+            qty_per_month = []
+            j = i + 1
+            block_nums = []
+            
+            while j < len(lines) and j < i + 60:
+                next_line = lines[j].strip()
+                # 次の部番が来たら終了
+                if part_no_pattern.match(next_line) and j > i + 2:
+                    break
+                # 数値行を収集
+                # 整数のみ（量産数量）
+                if re.match(r"^\d{1,6}$", next_line):
+                    block_nums.append(("qty", int(next_line)))
+                # 小数点あり（単価）
+                elif re.match(r"^[\d,]+\.\d{2}$", next_line):
+                    block_nums.append(("price", next_line))
+                # 大きい整数（金額）
+                elif re.match(r"^[\d,]{5,}$", next_line):
+                    block_nums.append(("amount", next_line))
+                j += 1
+            
+            # 量産数量のみ抽出（各月1つ）
+            qtys = [v for t, v in block_nums if t == "qty"]
+            month_qtys = qtys[:6]
+            while len(month_qtys) < 6:
+                month_qtys.append(0)
+            
+            if any(q > 0 for q in month_qtys) and len(part_no) >= 5:
+                items.append({
+                    "part_no": part_no,
+                    "sku": part_no,
+                    "product_name": part_name,
+                    "month_qtys": month_qtys,
+                    "month_labels": month_labels[:6] if month_labels else [
+                        (datetime.now() + relativedelta(months=k)).strftime("%Y-%m")
+                        for k in range(6)
+                    ],
+                })
+            i = j
+        else:
+            i += 1
+    
+    return items[:100]
+
+
+def _find_customer(text: str) -> str:
+    m = re.search(r"取引先[（(](\d+)[）)]", text)
+    if m:
+        return f"取引先コード: {m.group(1)}"
+    m = re.search(r"(?:得意先|Customer)[:\s]+([^\n]+)", text)
+    if m:
+        return m.group(1).strip()
+    return "（PDFから自動抽出）"
+
+
+def calculate_order_proposals(db: Session, supplier_id: str, target_month: str) -> List[dict]:
     proposals = []
-
-    # 対象月の全内示を取得
     forecast_items = db.query(ForecastItem).all()
 
-    # 商品ごとに集計
     product_forecasts = {}
     for fi in forecast_items:
         if not fi.product_id:
             continue
-        # 対象月の内示数量を取得
         for i, label in enumerate([fi.month_1_label, fi.month_2_label, fi.month_3_label,
                                     fi.month_4_label, fi.month_5_label, fi.month_6_label]):
             if label == target_month:
-                qty_attr = f"month_{i+1}_qty"
-                qty = getattr(fi, qty_attr, 0) or 0
-                if fi.product_id not in product_forecasts:
-                    product_forecasts[fi.product_id] = 0
-                product_forecasts[fi.product_id] += qty
+                qty = getattr(fi, f"month_{i+1}_qty", 0) or 0
+                product_forecasts[fi.product_id] = product_forecasts.get(fi.product_id, 0) + qty
 
     for product_id, forecast_qty in product_forecasts.items():
         product = db.query(Product).filter(Product.id == product_id).first()
         if not product or product.supplier_id != supplier_id:
             continue
 
-        # 現在庫数量
         inv = db.query(Inventory).filter(Inventory.product_id == product_id).first()
         current_stock = inv.quantity if inv else 0
 
-        # 発注残数量（ordered/confirmed/in_transit の合計）
         pending_orders = db.query(PurchaseOrder).filter(
             PurchaseOrder.supplier_id == supplier_id,
             PurchaseOrder.status.in_([POStatus.ordered, POStatus.confirmed, POStatus.in_transit])
         ).all()
-        pending_qty = 0
-        for po in pending_orders:
-            for item in po.items:
-                if item.product_id == product_id:
-                    pending_qty += item.quantity
+        pending_qty = sum(
+            item.quantity for po in pending_orders
+            for item in po.items if item.product_id == product_id
+        )
 
-        # 安全在庫係数
         safety = db.query(SafetyStock).filter(SafetyStock.product_id == product_id).first()
         safety_qty = safety.safety_stock_qty if safety else 0
-
-        # 発注数量計算
         proposed_qty = max(0, forecast_qty - current_stock - pending_qty + safety_qty)
 
         proposals.append({
@@ -185,13 +206,8 @@ def calculate_order_proposals(
 
     return proposals
 
-def create_proposal_from_calculation(
-    db: Session,
-    supplier_id: str,
-    target_month: str,
-    items: List[dict],
-) -> AutoOrderProposal:
-    """計算結果から発注提案を作成"""
+
+def create_proposal_from_calculation(db: Session, supplier_id: str, target_month: str, items: List[dict]) -> AutoOrderProposal:
     proposal = AutoOrderProposal(
         id=str(uuid.uuid4()),
         supplier_id=supplier_id,
@@ -209,7 +225,7 @@ def create_proposal_from_calculation(
             continue
         amount = item.get("proposed_qty", 0) * item.get("unit_price", 0)
         total += amount
-        pi = AutoOrderProposalItem(
+        db.add(AutoOrderProposalItem(
             id=str(uuid.uuid4()),
             proposal_id=proposal.id,
             product_id=item["product_id"],
@@ -223,8 +239,7 @@ def create_proposal_from_calculation(
             unit_price=item.get("unit_price", 0),
             amount=amount,
             unit=item.get("unit", "個"),
-        )
-        db.add(pi)
+        ))
 
     proposal.total_amount = total
     db.commit()
