@@ -586,9 +586,13 @@ const ForecastOrders: React.FC = () => {
         {calcResult && (
           <div style={{ marginTop: 16 }}>
             <Alert
-              type="success"
+              type={calcResult.items.length > 0 ? "success" : "warning"}
               message={`計算完了: ${calcResult.items.length}件 / 合計 ${formatAmount(calcResult.total_amount, 'JPY')}`}
-              description={`計算式: ${calcResult.formula_note}`}
+              description={
+                calcResult.items.length === 0
+                  ? "内示データが見つかりません。先に内示PDFを取り込んでください。"
+                  : `計算式: ${calcResult.formula_note} | 商品マスタ未登録の部番は単価0円で表示されます`
+              }
               showIcon
               style={{ marginBottom: 16 }}
             />
@@ -598,10 +602,12 @@ const ForecastOrders: React.FC = () => {
               size="small"
               pagination={false}
               columns={[
-                { title: 'SKU', dataIndex: 'sku', key: 'sku', render: (v: string) => <Text code>{v}</Text> },
-                { title: '商品名', dataIndex: 'product_name', key: 'product_name' },
+                { title: '部番/SKU', dataIndex: 'sku', key: 'sku', width: 200,
+                  render: (v: string) => <Text code style={{ fontSize: 11 }}>{v}</Text> },
+                { title: '部品名称', dataIndex: 'product_name', key: 'product_name', width: 180,
+                  render: (v: string) => <Text ellipsis style={{ maxWidth: 160 }}>{v}</Text> },
                 { title: '内示数量', dataIndex: 'forecast_qty', key: 'forecast_qty',
-                  render: (v: number) => <Text style={{ color: '#1F3864' }}>{v}</Text> },
+                  render: (v: number) => <Text strong style={{ color: '#1F3864' }}>{v.toLocaleString()}</Text> },
                 { title: '現在庫', dataIndex: 'current_stock', key: 'current_stock',
                   render: (v: number) => <Text style={{ color: '#52c41a' }}>-{v}</Text> },
                 { title: '発注残', dataIndex: 'pending_order_qty', key: 'pending_order_qty',
@@ -610,10 +616,14 @@ const ForecastOrders: React.FC = () => {
                   render: (v: number) => <Text style={{ color: '#722ed1' }}>+{v}</Text> },
                 { title: '発注数量', dataIndex: 'proposed_qty', key: 'proposed_qty',
                   render: (v: number) => (
-                    <Text strong style={{ color: v > 0 ? '#1F3864' : '#999', fontSize: 16 }}>{v}</Text>
+                    <Text strong style={{ color: v > 0 ? '#1F3864' : '#999', fontSize: 16 }}>{v.toLocaleString()}</Text>
                   ) },
                 { title: '金額', dataIndex: 'amount', key: 'amount',
-                  render: (v: number) => formatAmount(v, 'JPY') },
+                  render: (v: number) => v > 0 ? formatAmount(v, 'JPY') : '-' },
+                { title: '商品マスタ', dataIndex: 'linked', key: 'linked',
+                  render: (v: boolean) => v
+                    ? <Tag color="green">紐付済</Tag>
+                    : <Tag color="orange">未登録</Tag> },
               ]}
             />
           </div>

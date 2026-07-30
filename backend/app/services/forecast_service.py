@@ -155,54 +155,92 @@ def _find_customer(text: str) -> str:
 
 
 def calculate_order_proposals(db: Session, supplier_id: str, target_month: str) -> List[dict]:
+    """
+    発注数量 = 内示数量 - 現在庫数量 - 発注残数量 + 安全在庫係数
+    商品マスタ紐付けあり・なし両方に対応
+    """
     proposals = []
     forecast_items = db.query(ForecastItem).all()
 
-    product_forecasts = {}
+    # 内示明細を集計（部番ベース）
+    # key: (product_id or sku, product_name, sku)
+    item_map = {}
     for fi in forecast_items:
-        if not fi.product_id:
-            continue
         for i, label in enumerate([fi.month_1_label, fi.month_2_label, fi.month_3_label,
                                     fi.month_4_label, fi.month_5_label, fi.month_6_label]):
             if label == target_month:
                 qty = getattr(fi, f"month_{i+1}_qty", 0) or 0
-                product_forecasts[fi.product_id] = product_forecasts.get(fi.product_id, 0) + qty
+                if qty == 0:
+                    continue
+                key = fi.product_id or fi.sku
+                if key not in item_map:
+                    item_map[key] = {
+                        "product_id": fi.product_id,
+                        "sku": fi.sku,
+                        "product_name": fi.product_name,
+                        "forecast_qty": 0,
+                    }
+                item_map[key]["forecast_qty"] += qty
 
-    for product_id, forecast_qty in product_forecasts.items():
-        product = db.query(Product).filter(Product.id == product_id).first()
-        if not product or product.supplier_id != supplier_id:
-            continue
+    for key, item_data in item_map.items():
+        forecast_qty = item_data["forecast_qty"]
+        product_id = item_data["product_id"]
+        sku = item_data["sku"]
+        product_name = item_data["product_name"]
 
-        inv = db.query(Inventory).filter(Inventory.product_id == product_id).first()
-        current_stock = inv.quantity if inv else 0
-
-        pending_orders = db.query(PurchaseOrder).filter(
-            PurchaseOrder.supplier_id == supplier_id,
-            PurchaseOrder.status.in_([POStatus.ordered, POStatus.confirmed, POStatus.in_transit])
-        ).all()
-        pending_qty = sum(
-            item.quantity for po in pending_orders
-            for item in po.items if item.product_id == product_id
-        )
-
-        safety = db.query(SafetyStock).filter(SafetyStock.product_id == product_id).first()
-        safety_qty = safety.safety_stock_qty if safety else 0
-        proposed_qty = max(0, forecast_qty - current_stock - pending_qty + safety_qty)
-
-        proposals.append({
-            "product_id": product_id,
-            "product_name": product.product_name,
-            "sku": product.sku,
-            "forecast_qty": forecast_qty,
-            "current_stock": current_stock,
-            "pending_order_qty": pending_qty,
-            "safety_stock_qty": safety_qty,
-            "proposed_qty": proposed_qty,
-            "unit_price": float(product.unit_price) if product.unit_price else 0,
-            "amount": proposed_qty * float(product.unit_price) if product.unit_price else 0,
-            "unit": product.unit,
-            "formula": f"{forecast_qty} - {current_stock} - {pending_qty} + {safety_qty} = {proposed_qty}",
-        })
+        # 商品マスタ紐付きの場合
+        if product_id:
+            product = db.query(Product).filter(Product.id == product_id).first()
+            if product:
+                # 仕入先フィルター（supplier_idが指定されている場合）
+                if supplier_id and product.supplier_id and product.supplier_id != supplier_id:
+                    continue
+                inv = db.query(Inventory).filter(Inventory.product_id == product_id).first()
+                current_stock = inv.quantity if inv else 0
+                pending_orders = db.query(PurchaseOrder).filter(
+                    PurchaseOrder.supplier_id == supplier_id,
+                    PurchaseOrder.status.in_([POStatus.ordered, POStatus.confirmed, POStatus.in_transit])
+                ).all()
+                pending_qty = sum(
+                    item.quantity for po in pending_orders
+                    for item in po.items if item.product_id == product_id
+                )
+                safety = db.query(SafetyStock).filter(SafetyStock.product_id == product_id).first()
+                safety_qty = safety.safety_stock_qty if safety else 0
+                proposed_qty = max(0, forecast_qty - current_stock - pending_qty + safety_qty)
+                proposals.append({
+                    "product_id": product_id,
+                    "product_name": product.product_name,
+                    "sku": product.sku,
+                    "forecast_qty": forecast_qty,
+                    "current_stock": current_stock,
+                    "pending_order_qty": pending_qty,
+                    "safety_stock_qty": safety_qty,
+                    "proposed_qty": proposed_qty,
+                    "unit_price": float(product.unit_price) if product.unit_price else 0,
+                    "amount": proposed_qty * float(product.unit_price) if product.unit_price else 0,
+                    "unit": product.unit,
+                    "formula": f"{forecast_qty} - {current_stock} - {pending_qty} + {safety_qty} = {proposed_qty}",
+                    "linked": True,
+                })
+        else:
+            # 商品マスタ未紐付きの場合（内示データのみで計算）
+            proposed_qty = forecast_qty  # 在庫・発注残は0として計算
+            proposals.append({
+                "product_id": None,
+                "product_name": product_name,
+                "sku": sku,
+                "forecast_qty": forecast_qty,
+                "current_stock": 0,
+                "pending_order_qty": 0,
+                "safety_stock_qty": 0,
+                "proposed_qty": proposed_qty,
+                "unit_price": 0,
+                "amount": 0,
+                "unit": "個",
+                "formula": f"{forecast_qty} - 0 - 0 + 0 = {proposed_qty}（商品マスタ未登録）",
+                "linked": False,
+            })
 
     return proposals
 
