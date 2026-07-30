@@ -1,14 +1,6 @@
 FROM python:3.12-slim
 
-# 最小限の依存関係のみ（Tesseract不使用・Railway対応）
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    poppler-utils \
-    libglib2.0-0 \
-    libgomp1 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# 作業ディレクトリ
+# apt-get一切不使用 - 純粋なPythonのみ
 WORKDIR /app
 
 # Pythonライブラリインストール
