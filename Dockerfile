@@ -1,23 +1,9 @@
 FROM python:3.12-slim
 
-# システム依存関係（Tesseract OCR + 日本語 + PDF処理）
-RUN apt-get update && apt-get install -y \
-    tesseract-ocr \
-    tesseract-ocr-jpn \
-    poppler-utils \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgomp1 \
-    fonts-noto-cjk \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# 作業ディレクトリ
+# キャッシュバスター: 2026-07-30-v4
 WORKDIR /app
 
-# Pythonライブラリインストール
+# Pythonライブラリインストール（apt-get不使用）
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
