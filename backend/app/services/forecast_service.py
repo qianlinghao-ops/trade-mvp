@@ -1,6 +1,7 @@
 """
-内示管理サービス - 実際のPDFフォーマット対応版
-商品マスタ紐付けあり・なし両方に対応
+内示管理サービス - 実際のPDFフォーマット完全対応版
+PDFの構造: 全データが1行に連結されている
+部番+カラー+単価群+合計数量+月別数量×6+部品名+金額群
 """
 import re
 import uuid
@@ -25,6 +26,7 @@ except ImportError:
 
 
 def extract_forecast_from_pdf(file_path: str) -> dict:
+    """PDFから内示データを抽出"""
     text = ""
     if PDF_AVAILABLE:
         try:
@@ -35,96 +37,112 @@ def extract_forecast_from_pdf(file_path: str) -> dict:
                     text += t + "\n"
         except Exception as e:
             print(f"PDF読み込みエラー: {e}")
-    return _parse_honda_forecast(text)
+    return _parse_forecast_text(text)
 
 
-def _parse_honda_forecast(text: str) -> dict:
-    # 月ラベルを抽出（例: 26-04 → 2026-04）
-    month_pattern = re.findall(r"\b(\d{2})-(\d{2})\b", text)
+def _parse_forecast_text(text: str) -> dict:
+    """
+    実際のPDFフォーマットを解析
+    月ヘッダーが連結: "26-0426-0526-0626-0726-0826-09"
+    データが1行に連結: "部番カラー単価群合計数量月別数量×6部品名金額群"
+    """
+    # 月ラベル抽出（連結形式: "26-0426-05..." → ["2026-04","2026-05"...]）
+    month_block = re.search(r'((?:\d{2}-\d{2}){2,})', text)
     month_labels = []
-    seen = set()
-    for yy, mm in month_pattern:
-        year = 2000 + int(yy)
-        label = f"{year}-{mm}"
-        if label not in seen and 1 <= int(mm) <= 12:
-            seen.add(label)
-            month_labels.append(label)
-    month_labels = month_labels[:6]
+    if month_block:
+        raw = month_block.group(1)
+        month_labels_raw = re.findall(r'\d{2}-\d{2}', raw)
+        month_labels = [f"20{m}" for m in month_labels_raw[:6]]
 
-    items = _extract_items_from_text(text, month_labels)
+    # デフォルト月ラベル（抽出失敗時）
+    if not month_labels:
+        month_labels = [
+            (datetime.now() + relativedelta(months=i)).strftime("%Y-%m")
+            for i in range(6)
+        ]
+
+    items = _extract_items(text, month_labels)
 
     return {
         "customer": _find_customer(text),
         "forecast_month": month_labels[0] if month_labels else datetime.now().strftime("%Y-%m"),
         "month_labels": month_labels,
         "items": items,
-        "raw_text": text[:2000],
+        "raw_text": text[:1000],
         "total_items": len(items),
     }
 
 
-def _extract_items_from_text(text: str, month_labels: list) -> list:
+def _extract_items(text: str, month_labels: list) -> list:
+    """
+    部番+月別数量を抽出
+    パターン: 部番 カラーコード 単価群 合計数量 月1 月2 月3 月4 月5 月6 部品名
+    """
+    # 部番パターン: 数字+英字で始まり、ハイフン区切り
+    # カラーコード: K2AE00, K3AF03 等
+    pattern = re.compile(
+        r'(\d[A-Z]\d{3}-[A-Z0-9]{2,}(?:\s*-\s*[A-Z0-9]+)*(?:\s*-\s*\d+)?(?:\s*-\s*\d+)?)'
+        r'\s*([A-Z]\d[A-Z]{2}\d{2})'      # カラーコード
+        r'(?:\s+[\d,]+\.\d{2})*'           # 単価群（スキップ）
+        r'\s+(\d{1,6})'                    # 合計数量
+        r'\s+(\d{1,6})'                    # 月1
+        r'\s+(\d{1,6})'                    # 月2
+        r'\s+(\d{1,6})'                    # 月3
+        r'\s+(\d{1,6})'                    # 月4
+        r'\s+(\d{1,6})'                    # 月5
+        r'\s+(\d{1,6})'                    # 月6
+        r'\s*([A-Z][A-Z,\(\)\s\-\.A-Z]{3,30}?)'  # 部品名
+        r'(?:\s+[\d,]+|\s*$)'              # 数値または行末
+    )
+
     items = []
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
-    part_no_pattern = re.compile(r"^([A-Z0-9]{4,}-[A-Z0-9]{2,}(?:\s*-\s*[A-Z0-9]+)*(?:\s*-\s*\d+)?(?:\s*-\s*\d+)?)")
+    seen = set()
 
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        m = part_no_pattern.match(line)
-        if m:
-            part_no = m.group(1).strip()
-            name_match = re.search(r"([A-Z][A-Z,\(\)\s\-\.]{4,})", line)
-            part_name = name_match.group(1).strip() if name_match else part_no
+    for m in pattern.finditer(text):
+        part_no = m.group(1).strip()
+        total_qty = int(m.group(3))
+        month_qtys = [int(m.group(i)) for i in range(4, 10)]
+        part_name = m.group(10).strip().rstrip(',').strip()
 
-            block_nums = []
-            j = i + 1
-            while j < len(lines) and j < i + 60:
-                next_line = lines[j].strip()
-                if part_no_pattern.match(next_line) and j > i + 2:
-                    break
-                if re.match(r"^\d{1,6}$", next_line):
-                    block_nums.append(("qty", int(next_line)))
-                elif re.match(r"^[\d,]+\.\d{2}$", next_line):
-                    block_nums.append(("price", next_line))
-                elif re.match(r"^[\d,]{5,}$", next_line):
-                    block_nums.append(("amount", next_line))
-                j += 1
+        # 重複除去
+        if part_no in seen:
+            continue
+        seen.add(part_no)
 
-            qtys = [v for t, v in block_nums if t == "qty"]
-            month_qtys = qtys[:6]
-            while len(month_qtys) < 6:
-                month_qtys.append(0)
+        # 月別合計の検証（合計数量と大きく乖離する場合はスキップ）
+        month_sum = sum(month_qtys)
+        if total_qty > 0 and month_sum > 0 and abs(month_sum - total_qty) > total_qty * 0.5:
+            continue
 
-            if any(q > 0 for q in month_qtys) and len(part_no) >= 5:
-                items.append({
-                    "part_no": part_no,
-                    "sku": part_no,
-                    "product_name": part_name,
-                    "month_qtys": month_qtys,
-                    "month_labels": month_labels[:6] if month_labels else [
-                        (datetime.now() + relativedelta(months=k)).strftime("%Y-%m")
-                        for k in range(6)
-                    ],
-                })
-            i = j
-        else:
-            i += 1
+        items.append({
+            "part_no": part_no,
+            "sku": part_no,
+            "product_name": part_name,
+            "month_qtys": month_qtys,
+            "month_labels": month_labels[:6],
+            "total_qty": total_qty,
+        })
 
     return items[:100]
 
 
 def _find_customer(text: str) -> str:
-    m = re.search(r"取引先[（(](\d+)[）)]", text)
+    """取引先情報を抽出"""
+    m = re.search(r'取引先[（(](\d+)[）)]', text)
     if m:
         return f"取引先コード: {m.group(1)}"
     return "（PDFから自動抽出）"
 
 
 def calculate_order_proposals(db: Session, supplier_id: str, target_month: str) -> List[dict]:
+    """
+    発注数量 = 内示数量 - 現在庫数量 - 発注残数量 + 安全在庫係数
+    商品マスタ紐付けあり・なし両方に対応
+    """
     proposals = []
     forecast_items = db.query(ForecastItem).all()
 
+    # 内示明細を集計（部番ベース）
     item_map = {}
     for fi in forecast_items:
         for i, label in enumerate([fi.month_1_label, fi.month_2_label, fi.month_3_label,
@@ -133,7 +151,7 @@ def calculate_order_proposals(db: Session, supplier_id: str, target_month: str) 
                 qty = getattr(fi, f"month_{i+1}_qty", 0) or 0
                 if qty == 0:
                     continue
-                key = fi.product_id or fi.sku
+                key = fi.product_id or fi.sku or fi.product_name
                 if key not in item_map:
                     item_map[key] = {
                         "product_id": fi.product_id,
@@ -150,6 +168,7 @@ def calculate_order_proposals(db: Session, supplier_id: str, target_month: str) 
         product_name = item_data["product_name"]
 
         if product_id:
+            # 商品マスタ紐付きの場合
             product = db.query(Product).filter(Product.id == product_id).first()
             if product:
                 if supplier_id and product.supplier_id and product.supplier_id != supplier_id:
@@ -183,6 +202,7 @@ def calculate_order_proposals(db: Session, supplier_id: str, target_month: str) 
                     "linked": True,
                 })
         else:
+            # 商品マスタ未登録の場合（内示数量をそのまま発注数量に）
             proposals.append({
                 "product_id": None,
                 "product_name": product_name,
@@ -203,6 +223,7 @@ def calculate_order_proposals(db: Session, supplier_id: str, target_month: str) 
 
 
 def create_proposal_from_calculation(db: Session, supplier_id: str, target_month: str, items: List[dict]) -> AutoOrderProposal:
+    """計算結果から発注提案を作成"""
     proposal = AutoOrderProposal(
         id=str(uuid.uuid4()),
         supplier_id=supplier_id,
