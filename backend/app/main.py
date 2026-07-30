@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 from app.database import init_db
-from app.api import documents, companies, products, inventory, purchase_orders, sales_orders, dashboard
+from app.api import documents, companies, products, inventory, purchase_orders, sales_orders, dashboard, forecast, notifications
 from app.config import settings
 from app.utils.seed import seed_demo_data
 
@@ -30,6 +30,8 @@ app.include_router(inventory.router, prefix="/api")
 app.include_router(purchase_orders.router, prefix="/api")
 app.include_router(sales_orders.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(forecast.router, prefix="/api")
+app.include_router(notifications.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup():

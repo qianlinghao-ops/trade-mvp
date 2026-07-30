@@ -10,6 +10,7 @@ import SalesOrders from './pages/SalesOrders';
 import Inventory from './pages/Inventory';
 import Companies from './pages/Companies';
 import Products from './pages/Products';
+import ForecastOrders from './pages/ForecastOrders';
 import { getInventoryAlerts } from './api';
 import 'antd/dist/reset.css';
 
@@ -42,6 +43,7 @@ const App: React.FC = () => {
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/companies" element={<Companies />} />
             <Route path="/products" element={<Products />} />
+            <Route path="/forecast" element={<ForecastOrders />} />
           </Routes>
         </AppLayout>
       </BrowserRouter>

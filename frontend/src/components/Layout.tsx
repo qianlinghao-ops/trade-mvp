@@ -18,6 +18,7 @@ interface AppLayoutProps {
 const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: 'ダッシュボード' },
   { key: '/documents', icon: <FileTextOutlined />, label: '書類管理' },
+  { key: '/forecast', icon: <FileTextOutlined />, label: '内示・自動発注' },
   { key: '/purchase-orders', icon: <ShoppingCartOutlined />, label: '発注管理' },
   { key: '/sales-orders', icon: <InboxOutlined />, label: '受注管理' },
   { key: '/inventory', icon: <AppstoreOutlined />, label: '在庫管理' },
