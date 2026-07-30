@@ -87,18 +87,32 @@ async def upload_forecast(
                             product = p
                             break
 
+            # 12ヶ月分のデータを準備
+            month_qtys_12 = item_data.get("month_qtys", [])
+            month_labels_12 = item_data.get("month_labels", [])
+            while len(month_qtys_12) < 12:
+                month_qtys_12.append(0)
+            while len(month_labels_12) < 12:
+                month_labels_12.append("")
+
             fi = ForecastItem(
                 id=str(uuid.uuid4()),
                 forecast_order_id=forecast.id,
                 product_id=product.id if product else None,
                 product_name=item_data.get("product_name", ""),
                 sku=part_no,
-                month_1_qty=month_qtys[0], month_1_label=month_labels[0],
-                month_2_qty=month_qtys[1], month_2_label=month_labels[1],
-                month_3_qty=month_qtys[2], month_3_label=month_labels[2],
-                month_4_qty=month_qtys[3], month_4_label=month_labels[3],
-                month_5_qty=month_qtys[4], month_5_label=month_labels[4],
-                month_6_qty=month_qtys[5], month_6_label=month_labels[5],
+                month_1_qty=month_qtys_12[0], month_1_label=month_labels_12[0],
+                month_2_qty=month_qtys_12[1], month_2_label=month_labels_12[1],
+                month_3_qty=month_qtys_12[2], month_3_label=month_labels_12[2],
+                month_4_qty=month_qtys_12[3], month_4_label=month_labels_12[3],
+                month_5_qty=month_qtys_12[4], month_5_label=month_labels_12[4],
+                month_6_qty=month_qtys_12[5], month_6_label=month_labels_12[5],
+                month_7_qty=month_qtys_12[6], month_7_label=month_labels_12[6],
+                month_8_qty=month_qtys_12[7], month_8_label=month_labels_12[7],
+                month_9_qty=month_qtys_12[8], month_9_label=month_labels_12[8],
+                month_10_qty=month_qtys_12[9], month_10_label=month_labels_12[9],
+                month_11_qty=month_qtys_12[10], month_11_label=month_labels_12[10],
+                month_12_qty=month_qtys_12[11], month_12_label=month_labels_12[11],
             )
             db.add(fi)
 
@@ -171,6 +185,12 @@ async def get_forecast(forecast_id: str, db: Session = Depends(get_db)):
                     {"label": fi.month_4_label, "qty": fi.month_4_qty},
                     {"label": fi.month_5_label, "qty": fi.month_5_qty},
                     {"label": fi.month_6_label, "qty": fi.month_6_qty},
+                    {"label": fi.month_7_label, "qty": fi.month_7_qty},
+                    {"label": fi.month_8_label, "qty": fi.month_8_qty},
+                    {"label": fi.month_9_label, "qty": fi.month_9_qty},
+                    {"label": fi.month_10_label, "qty": fi.month_10_qty},
+                    {"label": fi.month_11_label, "qty": fi.month_11_qty},
+                    {"label": fi.month_12_label, "qty": fi.month_12_qty},
                 ]
             }
             for fi in f.items

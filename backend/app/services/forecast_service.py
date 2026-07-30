@@ -1,6 +1,6 @@
 """
-内示管理サービス - 実際のPDFフォーマット完全対応版 v4
-上期・下期を完全分離処理
+内示管理サービス - 実際のPDFフォーマット完全対応版 v5
+12ヶ月対応・上期下期完全分離・全部番抽出
 """
 import re
 import uuid
@@ -59,42 +59,70 @@ def _parse_forecast_text(text: str) -> dict:
     if not page_boundaries:
         page_boundaries = [(0, [(datetime.now() + relativedelta(months=i)).strftime("%Y-%m") for i in range(6)])]
 
+    print(f"ページ境界数: {len(page_boundaries)}")
+    for pb in page_boundaries:
+        print(f"  pos={pb[0]}, labels={pb[1]}")
+
     # 全ページを分割して処理
     all_items = []
     for idx, (boundary_pos, month_labels) in enumerate(page_boundaries):
-        # このページの終端
         next_pos = page_boundaries[idx + 1][0] if idx + 1 < len(page_boundaries) else len(text_norm)
         page_text = text_norm[boundary_pos:next_pos]
-        
-        # このページの部番を抽出
         page_items = _extract_items_from_page(page_text, month_labels)
+        print(f"  ページ{idx+1}({month_labels[0]}〜): {len(page_items)}件")
         all_items.extend(page_items)
 
-    # 重複除去（同じ部番+月ラベルの組み合わせ）
-    seen = set()
-    unique_items = []
-    for item in all_items:
-        key = f"{item['part_no']}_{item['month_labels'][0] if item['month_labels'] else ''}"
-        if key not in seen:
-            seen.add(key)
-            unique_items.append(item)
+    # 同じ部番の上期・下期データを統合（12ヶ月分に結合）
+    merged_items = _merge_items(all_items)
 
     first_month = page_boundaries[0][1][0] if page_boundaries else datetime.now().strftime("%Y-%m")
     all_month_sets = [pb[1] for pb in page_boundaries]
 
-    print(f"ページ数: {len(page_boundaries)}, 抽出件数: {len(unique_items)}")
-    for pb in page_boundaries:
-        print(f"  月セット: {pb[1]}")
+    print(f"統合後件数: {len(merged_items)}")
 
     return {
         "customer": _find_customer(text),
         "forecast_month": first_month,
         "month_labels": page_boundaries[0][1] if page_boundaries else [],
         "all_month_sets": all_month_sets,
-        "items": unique_items,
+        "items": merged_items,
         "raw_text": text[:1000],
-        "total_items": len(unique_items),
+        "total_items": len(merged_items),
     }
+
+
+def _merge_items(all_items: list) -> list:
+    """同じ部番の上期・下期データを12ヶ月分に統合"""
+    part_map = {}
+    for item in all_items:
+        part_no = item["part_no"]
+        if part_no not in part_map:
+            part_map[part_no] = {
+                "part_no": part_no,
+                "sku": part_no,
+                "product_name": item["product_name"],
+                "month_data": {},  # label -> qty
+            }
+        # 月別データを追加
+        for i, (label, qty) in enumerate(zip(item["month_labels"], item["month_qtys"])):
+            if label and label not in part_map[part_no]["month_data"]:
+                part_map[part_no]["month_data"][label] = qty
+
+    # 結果を整形（月順にソート）
+    result = []
+    for part_no, data in part_map.items():
+        sorted_months = sorted(data["month_data"].items())
+        month_labels = [m[0] for m in sorted_months]
+        month_qtys = [m[1] for m in sorted_months]
+        result.append({
+            "part_no": part_no,
+            "sku": part_no,
+            "product_name": data["product_name"],
+            "month_labels": month_labels,
+            "month_qtys": month_qtys,
+            "total_qty": sum(month_qtys),
+        })
+    return result
 
 
 def _extract_items_from_page(page_text: str, month_labels: list) -> list:
@@ -108,6 +136,8 @@ def _extract_items_from_page(page_text: str, month_labels: list) -> list:
         cc_end = cc_match.end()
 
         before = page_text[max(0, cc_start - 100):cc_start]
+
+        # 部番パターン（数字4-5桁始まり or 英字+数字始まり）
         part_match = re.search(
             r"(\d{4,5}-[A-Z0-9]{2,}(?:\s*-\s*[A-Z0-9]+)*(?:\s*-\s*\d+)?(?:\s*-\s*\d+)?)\s*$",
             before
@@ -133,7 +163,7 @@ def _extract_items_from_page(page_text: str, month_labels: list) -> list:
             total_qty = int_nums[0]
             month_qtys = int_nums[1:7]
 
-            if any(q > 0 for q in month_qtys):
+            if any(q > 0 for q in month_qtys) or total_qty > 0:
                 # 部品名称を抽出
                 name_match = re.search(
                     r"\d\s*([A-Z][A-Z,\(\)\s\-\.A-Z0-9]{3,50}?)(?:\s+\d|\s*$)",
@@ -171,12 +201,10 @@ def calculate_order_proposals(db: Session, supplier_id: str, target_month: str) 
 
     item_map = {}
     for fi in forecast_items:
-        for i, label in enumerate([fi.month_1_label, fi.month_2_label, fi.month_3_label,
-                                    fi.month_4_label, fi.month_5_label, fi.month_6_label]):
-            if label == target_month:
-                qty = getattr(fi, f"month_{i+1}_qty", 0) or 0
-                if qty == 0:
-                    continue
+        for i in range(1, 13):
+            label = getattr(fi, f"month_{i}_label", None)
+            qty = getattr(fi, f"month_{i}_qty", 0) or 0
+            if label == target_month and qty > 0:
                 key = fi.product_id or fi.sku or fi.product_name
                 if key not in item_map:
                     item_map[key] = {

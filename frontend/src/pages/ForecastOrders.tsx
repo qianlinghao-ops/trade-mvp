@@ -443,7 +443,7 @@ const ForecastOrders: React.FC = () => {
           <div>
             <Alert
               type="info"
-              message={`抽出件数: ${forecastDetail.items?.length}件 | 月別内示数量（6ヶ月分）`}
+              message={`抽出件数: ${forecastDetail.items?.length}件 | 月別内示数量（12ヶ月分）`}
               style={{ marginBottom: 16 }}
               showIcon
             />

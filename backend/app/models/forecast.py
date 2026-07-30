@@ -53,19 +53,31 @@ class ForecastItem(Base):
     product_name = Column(String(200), nullable=False)
     sku = Column(String(50))
     # 6ヶ月分の内示数量
-    month_1_qty = Column(Integer, default=0)   # 当月
-    month_2_qty = Column(Integer, default=0)   # 翌月
-    month_3_qty = Column(Integer, default=0)   # 翌々月
+    month_1_qty = Column(Integer, default=0)
+    month_2_qty = Column(Integer, default=0)
+    month_3_qty = Column(Integer, default=0)
     month_4_qty = Column(Integer, default=0)
     month_5_qty = Column(Integer, default=0)
     month_6_qty = Column(Integer, default=0)
-    # 対象月
-    month_1_label = Column(String(7))  # "2026-08"
+    month_7_qty = Column(Integer, default=0)
+    month_8_qty = Column(Integer, default=0)
+    month_9_qty = Column(Integer, default=0)
+    month_10_qty = Column(Integer, default=0)
+    month_11_qty = Column(Integer, default=0)
+    month_12_qty = Column(Integer, default=0)
+    # 対象月ラベル
+    month_1_label = Column(String(7))
     month_2_label = Column(String(7))
     month_3_label = Column(String(7))
     month_4_label = Column(String(7))
     month_5_label = Column(String(7))
     month_6_label = Column(String(7))
+    month_7_label = Column(String(7))
+    month_8_label = Column(String(7))
+    month_9_label = Column(String(7))
+    month_10_label = Column(String(7))
+    month_11_label = Column(String(7))
+    month_12_label = Column(String(7))
 
     forecast_order = relationship("ForecastOrder", back_populates="items")
     product = relationship("Product")
