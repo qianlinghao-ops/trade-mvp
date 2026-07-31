@@ -52,6 +52,35 @@ async def health():
 
 
 
+
+@app.get("/api/debug/num-extract")
+async def num_extract():
+    import os, glob, re
+    from app.config import settings
+    from app.services.forecast_service import _normalize
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return {"error": "pypdf not available"}
+    upload_dir = str(settings.UPLOAD_DIR)
+    pdf_files = sorted(glob.glob(os.path.join(upload_dir, "forecast_*.pdf")), key=os.path.getmtime, reverse=True)
+    if not pdf_files:
+        return {"error": "PDFなし"}
+    text = ""
+    for page in PdfReader(pdf_files[0]).pages:
+        t = page.extract_text()
+        if t: text += t + "\n"
+    text_norm = _normalize(text)
+    results = []
+    for cc_match in re.finditer(r"K2AE00", text_norm):
+        cc_end = cc_match.end()
+        after = text_norm[cc_end:cc_end+400]
+        after_no_prices = re.sub(r"\d+\.\d{2}", "", after)
+        int_tokens = re.findall(r"(?<!\d)(\d{1,7})(?!\d)", after_no_prices)
+        int_nums = [int(t) for t in int_tokens if int(t) <= 9999999]
+        results.append({"pos": cc_match.start(), "after_200": after[:200], "int_nums": int_nums[:12]})
+    return {"matches": len(results), "results": results[:4]}
+
 @app.get("/api/debug/pdf-text")
 async def pdf_text():
     import os, glob, re
