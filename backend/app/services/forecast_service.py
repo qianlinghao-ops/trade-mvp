@@ -50,21 +50,63 @@ def _normalize(text: str) -> str:
 def _parse_forecast_text(text: str) -> dict:
     text_norm = _normalize(text)
 
-    # ページ境界検出（月ヘッダー位置）
+    # ページ境界検出（改良版）
+    # 連結パターン "26-0426-05" と 個別パターン "26-04" の両方に対応
     page_boundaries = []
+    seen_label_sets = set()
+    
+    # 方法1: 連結パターン（例: "26-0426-0526-06..."）
     for mb in re.finditer(r"((?:\d{2}-\d{2}){2,})", text_norm):
         raw = mb.group(1)
         labels_raw = re.findall(r"\d{2}-\d{2}", raw)
         labels = [f"20{m}" for m in labels_raw if 1 <= int(m.split("-")[1]) <= 12]
         if len(labels) >= 2:
-            page_boundaries.append((mb.start(), labels[:6]))
-
+            key = tuple(labels[:6])
+            if key not in seen_label_sets:
+                seen_label_sets.add(key)
+                page_boundaries.append((mb.start(), labels[:6]))
+    
+    # 方法2: 個別パターン（改行区切り "26-04\n26-05\n..."）
     if not page_boundaries:
-        page_boundaries = [(0, [(datetime.now() + relativedelta(months=i)).strftime("%Y-%m") for i in range(6)])]
+        # 連続する日付パターンをグループ化
+        date_matches = list(re.finditer(r"\b(\d{2})-(\d{2})\b", text_norm))
+        i = 0
+        while i < len(date_matches):
+            group = [date_matches[i]]
+            j = i + 1
+            while j < len(date_matches) and date_matches[j].start() - date_matches[j-1].end() < 50:
+                group.append(date_matches[j])
+                j += 1
+            if len(group) >= 2:
+                labels = [f"20{m.group(1)}-{m.group(2)}" for m in group if 1 <= int(m.group(2)) <= 12]
+                if len(labels) >= 2:
+                    key = tuple(labels[:6])
+                    if key not in seen_label_sets:
+                        seen_label_sets.add(key)
+                        page_boundaries.append((group[0].start(), labels[:6]))
+            i = j if j > i else i + 1
+    
+    # デフォルト（検出失敗時）
+    if not page_boundaries:
+        # テキスト全体から日付を収集してグループ化
+        all_dates = re.findall(r"\b(\d{2})-(\d{2})\b", text_norm)
+        unique_dates = list(dict.fromkeys([f"20{yy}-{mm}" for yy, mm in all_dates if 1 <= int(mm) <= 12]))
+        if unique_dates:
+            # 上期・下期に分割
+            upper = [d for d in unique_dates if d <= "2026-09"][:6]
+            lower = [d for d in unique_dates if d > "2026-09"][:6]
+            if upper:
+                page_boundaries.append((0, upper))
+            if lower:
+                # 下期の開始位置を推定
+                mid = len(text_norm) // 2
+                page_boundaries.append((mid, lower))
+        if not page_boundaries:
+            page_boundaries = [(0, [(datetime.now() + relativedelta(months=i)).strftime("%Y-%m") for i in range(6)])]
 
     print(f"ページ境界: {len(page_boundaries)}件")
     for pb in page_boundaries:
-        print(f"  {pb[1]}")
+        print(f"  pos={pb[0]}, labels={pb[1]}")
 
     # 各ページを独立処理
     all_items = []
@@ -79,9 +121,10 @@ def _parse_forecast_text(text: str) -> dict:
     merged = _merge_12months(all_items)
     print(f"統合後: {len(merged)}件")
 
+    first_month = page_boundaries[0][1][0] if page_boundaries else datetime.now().strftime("%Y-%m")
     return {
         "customer": _find_customer(text),
-        "forecast_month": page_boundaries[0][1][0],
+        "forecast_month": first_month,
         "month_labels": page_boundaries[0][1],
         "items": merged,
         "raw_text": text[:500],
