@@ -66,13 +66,6 @@ async def upload_forecast(
 
         # 内示明細を保存
         for item_data in extracted.get("items", []):
-            month_qtys = item_data.get("month_qtys", [0]*6)
-            month_labels = item_data.get("month_labels", [""]*6)
-            while len(month_qtys) < 6:
-                month_qtys.append(0)
-            while len(month_labels) < 6:
-                month_labels.append("")
-
             # 部番（SKU）から商品マスタを検索
             product = None
             part_no = item_data.get("part_no") or item_data.get("sku", "")
