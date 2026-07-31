@@ -49,6 +49,23 @@ async def startup():
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": settings.VERSION, "app": settings.APP_NAME}
+
+@app.post("/api/debug/reset-db")
+async def reset_db():
+    """DBを強制リセット"""
+    from app.database import engine
+    from app.models.base import Base
+    from app.config import settings
+    import os
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db_path = str(settings.DATABASE_URL).replace("sqlite:///", "")
+    with open(db_path + ".version", "w") as vf:
+        vf.write("v6_12months")
+    from app.utils.seed import seed_demo_data
+    seed_demo_data()
+    return {"success": True, "message": "DBリセット完了（v6_12months）"}
+
 @app.get("/api/debug/db-info")
 async def db_info():
     """DBスキーマ情報を返す（デバッグ用）"""
