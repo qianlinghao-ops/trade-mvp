@@ -46,6 +46,35 @@ async def startup():
     init_db()
     seed_demo_data()
 
+
+@app.get("/api/debug/k2af")
+async def k2af():
+    import os, glob, re
+    from app.config import settings
+    from app.services.forecast_service import _normalize
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return {"error": "pypdf not available"}
+    upload_dir = str(settings.UPLOAD_DIR)
+    pdf_files = sorted(glob.glob(os.path.join(upload_dir, "forecast_*.pdf")), key=os.path.getmtime, reverse=True)
+    if not pdf_files:
+        return {"error": "PDFなし"}
+    text = ""
+    for page in PdfReader(pdf_files[0]).pages:
+        t = page.extract_text()
+        if t: text += t + "\n"
+    text_norm = _normalize(text)
+    results = []
+    for cc_match in re.finditer(r"K2AF00", text_norm):
+        cc_end = cc_match.end()
+        after = text_norm[cc_end:cc_end+300]
+        after_no_prices = re.sub(r"\d+\.\d{2}", "", after)
+        int_tokens = re.findall(r"(?<!\d)(\d{1,7})(?!\d)", after_no_prices)
+        int_nums = [int(t) for t in int_tokens if int(t) <= 9999999]
+        results.append({"pos": cc_match.start(), "after_raw": after[:150], "int_nums": int_nums[:10]})
+    return {"matches": len(results), "results": results[:4]}
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": settings.VERSION, "app": settings.APP_NAME}
