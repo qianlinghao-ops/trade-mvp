@@ -53,6 +53,46 @@ async def health():
 
 
 
+
+@app.get("/api/debug/dates-check")
+async def dates_check():
+    import os, glob, re
+    from app.config import settings
+    from app.services.forecast_service import _normalize
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return {"error": "pypdf not available"}
+    upload_dir = str(settings.UPLOAD_DIR)
+    pdf_files = sorted(glob.glob(os.path.join(upload_dir, "forecast_*.pdf")), key=os.path.getmtime, reverse=True)
+    if not pdf_files:
+        return {"error": "PDFなし"}
+    text = ""
+    for page in PdfReader(pdf_files[0]).pages:
+        t = page.extract_text()
+        if t: text += t + "\n"
+    text_norm = _normalize(text)
+    all_dates_raw = re.findall(r"\b(\d{2})-(\d{2})\b", text_norm)
+    all_dates = [f"20{yy}-{mm}" for yy, mm in all_dates_raw if 1 <= int(mm) <= 12]
+    unique_dates = list(dict.fromkeys(all_dates))
+    upper = [d for d in unique_dates if d <= "2026-09"][:6]
+    lower = [d for d in unique_dates if d > "2026-09"][:6]
+    date_matches = list(re.finditer(r"\b(\d{2})-(\d{2})\b", text_norm))
+    groups = []
+    i = 0
+    while i < len(date_matches):
+        group = [date_matches[i]]
+        j = i + 1
+        while j < len(date_matches) and date_matches[j].start() - date_matches[j-1].end() < 50:
+            group.append(date_matches[j])
+            j += 1
+        if len(group) >= 2:
+            labels = [f"20{m.group(1)}-{m.group(2)}" for m in group if 1 <= int(m.group(2)) <= 12]
+            if len(labels) >= 2:
+                groups.append({"pos": group[0].start(), "labels": labels[:6]})
+        i = j if j > i else i + 1
+    return {"all_dates_20": all_dates[:20], "unique_dates": unique_dates[:15], "upper": upper, "lower": lower, "groups": groups[:5]}
+
 @app.get("/api/debug/num-extract")
 async def num_extract():
     import os, glob, re
