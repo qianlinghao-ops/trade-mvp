@@ -30,6 +30,19 @@ app.include_router(notifications.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup():
+    import os
+    from app.config import settings
+    # DBファイルを削除してスキーマを再作成（スキーマ変更時）
+    db_path = str(settings.DATABASE_URL).replace("sqlite:///", "")
+    if os.path.exists(db_path):
+        # バージョンファイルで管理
+        version_file = db_path + ".version"
+        current_version = "v6_12months"
+        if not os.path.exists(version_file) or open(version_file).read() != current_version:
+            os.remove(db_path)
+            print(f"🔄 DBをリセット（スキーマ更新: {current_version}）")
+            with open(version_file, "w") as vf:
+                vf.write(current_version)
     init_db()
     seed_demo_data()
 
