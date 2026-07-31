@@ -116,11 +116,14 @@ async def upload_forecast(
         raise HTTPException(500, f"PDF解析エラー: {str(e)}")
 
     db.refresh(forecast)
+    items_debug = [{"part_no": i.get("part_no"), "month_labels": i.get("month_labels"), "month_qtys": i.get("month_qtys")} for i in extracted.get("items", [])[:5]]
     return {
         "forecast_id": forecast.id,
         "status": forecast.status,
         "extracted": extracted,
         "items_count": len(extracted.get("items", [])),
+        "debug_month_sets": extracted.get("all_month_sets"),
+        "debug_items": items_debug,
     }
 
 @router.get("")
