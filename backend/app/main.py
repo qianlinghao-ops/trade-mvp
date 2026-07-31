@@ -50,6 +50,36 @@ async def startup():
 async def health():
     return {"status": "ok", "version": settings.VERSION, "app": settings.APP_NAME}
 
+
+@app.get("/api/debug/parse-last-pdf")
+async def parse_last_pdf():
+    import os, glob, re
+    from app.config import settings
+    from app.services.forecast_service import _normalize, _parse_forecast_text
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return {"error": "pypdf not available"}
+    upload_dir = str(settings.UPLOAD_DIR)
+    pdf_files = sorted(glob.glob(os.path.join(upload_dir, "forecast_*.pdf")), key=os.path.getmtime, reverse=True)
+    if not pdf_files:
+        return {"error": "PDFなし", "files": os.listdir(upload_dir)}
+    text = ""
+    for page in PdfReader(pdf_files[0]).pages:
+        t = page.extract_text()
+        if t: text += t + "\n"
+    text_norm = _normalize(text)
+    page_boundaries = []
+    for mb in re.finditer(r"((?:\d{2}-\d{2}){2,})", text_norm):
+        raw = mb.group(1)
+        labels_raw = re.findall(r"\d{2}-\d{2}", raw)
+        labels = [f"20{m}" for m in labels_raw if 1 <= int(m.split("-")[1]) <= 12]
+        if len(labels) >= 2:
+            page_boundaries.append({"pos": mb.start(), "labels": labels[:6]})
+    result = _parse_forecast_text(text)
+    items_sample = [{"part_no": i.get("part_no"), "month_labels": i.get("month_labels"), "month_qtys": i.get("month_qtys")} for i in result.get("items", [])[:5]]
+    return {"pdf": os.path.basename(pdf_files[0]), "text_len": len(text), "page_boundaries": page_boundaries, "total_items": result.get("total_items"), "items_sample": items_sample}
+
 @app.post("/api/debug/reset-db")
 async def reset_db():
     """DBを強制リセット"""
