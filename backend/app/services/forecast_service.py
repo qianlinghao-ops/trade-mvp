@@ -43,7 +43,7 @@ def extract_forecast_from_pdf(file_path: str) -> dict:
 def _normalize(text: str) -> str:
     """カンマ区切り数値を正規化: 1,205→1205"""
     for _ in range(4):
-        text = re.sub(r"(\d),(\d{3})\b", r"\1\2", text)
+        text = re.sub(r"(\d),(\d{3})", r"\1\2", text)
     return text
 
 
