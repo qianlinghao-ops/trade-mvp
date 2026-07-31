@@ -51,6 +51,35 @@ async def health():
     return {"status": "ok", "version": settings.VERSION, "app": settings.APP_NAME}
 
 
+
+@app.get("/api/debug/pdf-text")
+async def pdf_text():
+    import os, glob, re
+    from app.config import settings
+    from app.services.forecast_service import _normalize
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return {"error": "pypdf not available"}
+    upload_dir = str(settings.UPLOAD_DIR)
+    pdf_files = sorted(glob.glob(os.path.join(upload_dir, "forecast_*.pdf")), key=os.path.getmtime, reverse=True)
+    if not pdf_files:
+        return {"error": "PDFなし"}
+    text = ""
+    for page in PdfReader(pdf_files[0]).pages:
+        t = page.extract_text()
+        if t: text += t + "\n"
+    text_norm = _normalize(text)
+    patterns = re.findall(r"\d{2}-\d{2}", text_norm[:5000])
+    connected = re.findall(r"(?:\d{2}-\d{2}){2,}", text_norm[:5000])
+    return {
+        "text_first_300": text[:300],
+        "text_norm_first_300": text_norm[:300],
+        "date_patterns": patterns[:20],
+        "connected_patterns": connected[:10],
+        "has_connected": bool(connected),
+    }
+
 @app.get("/api/debug/parse-last-pdf")
 async def parse_last_pdf():
     import os, glob, re
