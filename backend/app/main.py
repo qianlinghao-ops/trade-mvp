@@ -49,6 +49,31 @@ async def startup():
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": settings.VERSION, "app": settings.APP_NAME}
+@app.get("/api/debug/db-info")
+async def db_info():
+    """DBスキーマ情報を返す（デバッグ用）"""
+    import sqlite3, os
+    from app.config import settings
+    db_path = str(settings.DATABASE_URL).replace("sqlite:///", "")
+    version_file = db_path + ".version"
+    version = open(version_file).read() if os.path.exists(version_file) else "不明"
+    
+    if not os.path.exists(db_path):
+        return {"error": "DBファイルが存在しません", "version": version}
+    
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(forecast_items)")
+    columns = [row[1] for row in cursor.fetchall()]
+    conn.close()
+    
+    return {
+        "db_version": version,
+        "forecast_items_columns": columns,
+        "has_month_12": "month_12_qty" in columns,
+        "has_month_7": "month_7_qty" in columns,
+    }
+
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
 if STATIC_DIR.exists():
