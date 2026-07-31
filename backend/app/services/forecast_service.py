@@ -68,13 +68,13 @@ def _parse_forecast_text(text: str) -> dict:
     
     # 方法2: 個別パターン（改行区切り "26-04\n26-05\n..."）
     if not page_boundaries:
-        # 連続する日付パターンをグループ化
+        # 連続する日付パターンをグループ化（距離を広げて検出）
         date_matches = list(re.finditer(r"\b(\d{2})-(\d{2})\b", text_norm))
         i = 0
         while i < len(date_matches):
             group = [date_matches[i]]
             j = i + 1
-            while j < len(date_matches) and date_matches[j].start() - date_matches[j-1].end() < 50:
+            while j < len(date_matches) and date_matches[j].start() - date_matches[j-1].end() < 200:
                 group.append(date_matches[j])
                 j += 1
             if len(group) >= 2:
